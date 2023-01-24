@@ -767,3 +767,34 @@ func TestSecretScanner(t *testing.T) {
 		})
 	}
 }
+
+func TestFindLocation(t *testing.T) {
+	content := generateContent()
+	// 1. Cases where secret fragments are short
+	// print: Alloc = 102 MiB, TotalAlloc = 109 MiB, Sys = 132 MiB, HeapInuse = 104 Mib, HeapAlloc = 102 Mib
+	secret.FindLocationNew(500000, 500100, content)
+	// print: Alloc = 101 MiB, TotalAlloc = 207 MiB, Sys = 236 MiB, HeapInuse = 103 Mib, HeapAlloc = 101 Mib
+	//secret.FindLocationOld(500000, 500100, content)
+
+	// 2. Cases where secret fragments are long
+	// print: Alloc = 300 MiB, TotalAlloc = 308 MiB, Sys = 329 MiB, HeapInuse = 302 Mib, HeapAlloc = 300 Mib
+	//secret.FindLocationNew(0, len(content), content)
+	// print: Alloc = 398 MiB, TotalAlloc = 405 MiB, Sys = 441 MiB, HeapInuse = 400 Mib, HeapAlloc = 398 Mib
+	//secret.FindLocationOld(0, len(content), content)
+
+}
+
+// Simulate large file, has 10000 lines, and each line has 10 kib of content
+func generateContent() []byte {
+	const kib = 1024
+	const lineSize = 10 * kib
+	content := make([]byte, 10000*10*kib)
+	for i := 0; i < len(content); i++ {
+		if (i+1)%lineSize == 0 {
+			content[i] = '\n'
+		} else {
+			content[i] = 'a'
+		}
+	}
+	return content
+}

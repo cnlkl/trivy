@@ -3,8 +3,10 @@ package secret
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -426,7 +428,7 @@ func censorLocation(loc Location, input []byte) []byte {
 }
 
 func toFinding(rule Rule, loc Location, content []byte) types.SecretFinding {
-	startLine, endLine, code, matchLine := findLocation(loc.Start, loc.End, content)
+	startLine, endLine, code, matchLine := FindLocationNew(loc.Start, loc.End, content)
 
 	return types.SecretFinding{
 		RuleID:    rule.ID,
@@ -442,7 +444,7 @@ func toFinding(rule Rule, loc Location, content []byte) types.SecretFinding {
 
 const secretHighlightRadius = 2 // number of lines above + below each secret to include in code output
 
-func findLocation(start, end int, content []byte) (int, int, types.Code, string) {
+func FindLocationNew(start, end int, content []byte) (int, int, types.Code, string) {
 	startLineNum := bytes.Count(content[:start], lineSep)
 
 	lineStart := bytes.LastIndex(content[:start], lineSep)
@@ -500,5 +502,83 @@ func findLocation(start, end int, content []byte) (int, int, types.Code, string)
 		}
 	}
 
+	printMem()
 	return startLineNum + 1, endLineNum + 1, code, matchLine
+}
+
+func FindLocationOld(start, end int, content []byte) (int, int, types.Code, string) {
+	startLineNum := bytes.Count(content[:start], lineSep)
+
+	lineStart := bytes.LastIndex(content[:start], lineSep)
+	if lineStart == -1 {
+		lineStart = 0
+	} else {
+		lineStart += 1
+	}
+
+	lineEnd := bytes.Index(content[start:], lineSep)
+	if lineEnd == -1 {
+		lineEnd = len(content)
+	} else {
+		lineEnd += start
+	}
+
+	match := string(content[start:end])
+	matchLine := string(content[lineStart:lineEnd])
+	if len(matchLine) > 100 {
+		truncatedLineStart := lo.Ternary(start-30 < 0, 0, start-30)
+		truncatedLineEnd := lo.Ternary(end+20 > len(content), len(content), end+20)
+		matchLine = string(content[truncatedLineStart:truncatedLineEnd])
+	}
+	endLineNum := startLineNum + strings.Count(match, string(lineSep))
+
+	var code types.Code
+
+	lines := strings.Split(string(content), string(lineSep))
+	codeStart := lo.Ternary(startLineNum-secretHighlightRadius < 0, 0, startLineNum-secretHighlightRadius)
+	codeEnd := lo.Ternary(endLineNum+secretHighlightRadius > len(lines), len(lines), endLineNum+secretHighlightRadius)
+
+	rawLines := lines[codeStart:codeEnd]
+	var foundFirst bool
+	for i, rawLine := range rawLines {
+		realLine := codeStart + i
+		inCause := realLine >= startLineNum && realLine <= endLineNum
+		code.Lines = append(code.Lines, types.Line{
+			Number:      codeStart + i + 1,
+			Content:     rawLine,
+			IsCause:     inCause,
+			Highlighted: rawLine,
+			FirstCause:  !foundFirst && inCause,
+			LastCause:   false,
+		})
+		foundFirst = foundFirst || inCause
+	}
+	if len(code.Lines) > 0 {
+		for i := len(code.Lines) - 1; i >= 0; i-- {
+			if code.Lines[i].IsCause {
+				code.Lines[i].LastCause = true
+				break
+			}
+		}
+	}
+
+	printMem()
+	return startLineNum + 1, endLineNum + 1, code, matchLine
+}
+
+func printMem() {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	fmt.Printf(
+		"Alloc = %d MiB, TotalAlloc = %d MiB, Sys = %d MiB, HeapInuse = %d Mib, HeapAlloc = %d Mib\n",
+		bToMiB(m.Alloc),
+		bToMiB(m.TotalAlloc),
+		bToMiB(m.Sys),
+		bToMiB(m.HeapInuse),
+		bToMiB(m.HeapAlloc),
+	)
+}
+
+func bToMiB(b uint64) uint64 {
+	return b / 1024 / 1024
 }
